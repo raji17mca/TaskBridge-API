@@ -1,51 +1,44 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using TaskBridge_API.Common;
 
 namespace TaskBridge_API.Notifications;
 
+[Authorize]
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/notifications")]
 public class NotificationsController : ControllerBase
 {
-    // In-memory store; replace with a persistent data store later.
-    private static readonly List<Notification> Notifications = new();
-    private static int _nextId = 1;
+    private readonly INotificationService _notificationService;
+    private readonly ICurrentTenantProvider _tenantProvider;
+    private readonly ICurrentUserProvider _userProvider;
 
-    [HttpGet]
-    public ActionResult<IEnumerable<Notification>> GetAll() => Ok(Notifications);
-
-    [HttpGet("{id}")]
-    public ActionResult<Notification> GetById(int id)
+    public NotificationsController(INotificationService notificationService, ICurrentTenantProvider tenantProvider, ICurrentUserProvider userProvider)
     {
-        var notification = Notifications.FirstOrDefault(n => n.Id == id);
-        return notification is null ? NotFound() : Ok(notification);
+        _notificationService = notificationService;
+        _tenantProvider = tenantProvider;
+        _userProvider = userProvider;
     }
 
-    [HttpPost]
-    public ActionResult<Notification> Create(Notification notification)
+    /// <summary>Gets all unread notifications for a user. Callers may only query their own notifications.</summary>
+    [HttpGet("{userId}")]
+    public async Task<ActionResult<IEnumerable<NotificationResponse>>> GetUnread(Guid userId, CancellationToken cancellationToken)
     {
-        notification.Id = _nextId++;
-        notification.CreatedAt = DateTime.UtcNow;
-        Notifications.Add(notification);
-        return CreatedAtAction(nameof(GetById), new { id = notification.Id }, notification);
+        if (userId != _userProvider.UserId)
+        {
+            // Never let a user read another user's notifications, even within the same tenant.
+            return Forbid();
+        }
+
+        var notifications = await _notificationService.GetUnreadForUserAsync(_tenantProvider.TenantId, userId, cancellationToken);
+        return Ok(notifications);
     }
 
-    [HttpPut("{id}/read")]
-    public IActionResult MarkAsRead(int id)
+    /// <summary>Marks a notification as read. Callers may only mark their own notifications.</summary>
+    [HttpPatch("{id}/read")]
+    public async Task<ActionResult<NotificationResponse>> MarkAsRead(int id, CancellationToken cancellationToken)
     {
-        var notification = Notifications.FirstOrDefault(n => n.Id == id);
-        if (notification is null) return NotFound();
-
-        notification.IsRead = true;
-        return NoContent();
-    }
-
-    [HttpDelete("{id}")]
-    public IActionResult Delete(int id)
-    {
-        var notification = Notifications.FirstOrDefault(n => n.Id == id);
-        if (notification is null) return NotFound();
-
-        Notifications.Remove(notification);
-        return NoContent();
+        var updated = await _notificationService.MarkAsReadAsync(_tenantProvider.TenantId, _userProvider.UserId, id, cancellationToken);
+        return updated is null ? NotFound() : Ok(updated);
     }
 }

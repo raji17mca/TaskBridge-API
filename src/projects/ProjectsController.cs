@@ -1,53 +1,54 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using TaskBridge_API.Common;
 
 namespace TaskBridge_API.Projects;
 
+[Authorize]
 [ApiController]
 [Route("api/[controller]")]
 public class ProjectsController : ControllerBase
 {
-    // In-memory store; replace with a persistent data store later.
-    private static readonly List<Project> Projects = new();
-    private static int _nextId = 1;
+    private readonly IProjectService _projectService;
+    private readonly ICurrentTenantProvider _tenantProvider;
+    private readonly ICurrentUserProvider _userProvider;
 
-    [HttpGet]
-    public ActionResult<IEnumerable<Project>> GetAll() => Ok(Projects);
-
-    [HttpGet("{id}")]
-    public ActionResult<Project> GetById(int id)
+    public ProjectsController(IProjectService projectService, ICurrentTenantProvider tenantProvider, ICurrentUserProvider userProvider)
     {
-        var project = Projects.FirstOrDefault(p => p.Id == id);
+        _projectService = projectService;
+        _tenantProvider = tenantProvider;
+        _userProvider = userProvider;
+    }
+
+    /// <summary>Lists all projects for the given team within the caller's tenant.</summary>
+    [HttpGet("team/{teamId}")]
+    public async Task<ActionResult<IEnumerable<ProjectResponse>>> GetByTeam(Guid teamId, CancellationToken cancellationToken)
+    {
+        var projects = await _projectService.GetByTeamAsync(_tenantProvider.TenantId, teamId, cancellationToken);
+        return Ok(projects);
+    }
+
+    /// <summary>Creates a new project owned by the caller's tenant.</summary>
+    [HttpPost]
+    public async Task<ActionResult<ProjectResponse>> Create(CreateProjectRequest request, CancellationToken cancellationToken)
+    {
+        var project = await _projectService.CreateAsync(_tenantProvider.TenantId, _userProvider.UserId, request, cancellationToken);
+        return CreatedAtAction(nameof(GetByTeam), new { teamId = project.TeamId }, project);
+    }
+
+    /// <summary>Updates a project's status. Returns 404 if the project doesn't exist for the caller's tenant.</summary>
+    [HttpPut("{id}/status")]
+    public async Task<ActionResult<ProjectResponse>> UpdateStatus(int id, UpdateProjectStatusRequest request, CancellationToken cancellationToken)
+    {
+        var project = await _projectService.UpdateStatusAsync(_tenantProvider.TenantId, _userProvider.UserId, id, request, cancellationToken);
         return project is null ? NotFound() : Ok(project);
     }
 
-    [HttpPost]
-    public ActionResult<Project> Create(Project project)
-    {
-        project.Id = _nextId++;
-        project.CreatedAt = DateTime.UtcNow;
-        Projects.Add(project);
-        return CreatedAtAction(nameof(GetById), new { id = project.Id }, project);
-    }
-
-    [HttpPut("{id}")]
-    public IActionResult Update(int id, Project updated)
-    {
-        var project = Projects.FirstOrDefault(p => p.Id == id);
-        if (project is null) return NotFound();
-
-        project.Name = updated.Name;
-        project.Description = updated.Description;
-        project.IsCompleted = updated.IsCompleted;
-        return NoContent();
-    }
-
+    /// <summary>Deletes a project. Returns 404 if the project doesn't exist for the caller's tenant.</summary>
     [HttpDelete("{id}")]
-    public IActionResult Delete(int id)
+    public async Task<IActionResult> Delete(int id, CancellationToken cancellationToken)
     {
-        var project = Projects.FirstOrDefault(p => p.Id == id);
-        if (project is null) return NotFound();
-
-        Projects.Remove(project);
-        return NoContent();
+        var deleted = await _projectService.DeleteAsync(_tenantProvider.TenantId, _userProvider.UserId, id, cancellationToken);
+        return deleted ? NoContent() : NotFound();
     }
 }
