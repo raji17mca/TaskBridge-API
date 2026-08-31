@@ -7,3 +7,14 @@ obj/
 .idea/
 .vscode/
 TaskBridge-Assessment.zip
+
+# Local dev SQLite database (created by Database.EnsureCreated() at startup; never shared/committed)
+taskbridge.db
+taskbridge.db-shm
+taskbridge.db-wal
+
+# Scratch build output used for diagnostic builds (-p:BaseOutputPath=diagbin)
+diagbin*/
+
+# Reference/assessment materials, not project source
+*.pdf

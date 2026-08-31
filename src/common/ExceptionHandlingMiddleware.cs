@@ -8,11 +8,13 @@ public class ExceptionHandlingMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<ExceptionHandlingMiddleware> _logger;
+    private readonly IHostEnvironment _environment;
 
-    public ExceptionHandlingMiddleware(RequestDelegate next, ILogger<ExceptionHandlingMiddleware> logger)
+    public ExceptionHandlingMiddleware(RequestDelegate next, ILogger<ExceptionHandlingMiddleware> logger, IHostEnvironment environment)
     {
         _next = next;
         _logger = logger;
+        _environment = environment;
     }
 
     /// <summary>Runs the rest of the pipeline, converting any unhandled exception into a ProblemDetails response.</summary>
@@ -39,9 +41,12 @@ public class ExceptionHandlingMiddleware
         }
         catch (Exception ex)
         {
-            // Deliberately generic: never surface stack traces or internal exception messages to clients.
+            // Full details only in Development - never leak stack traces/messages to clients in other environments.
             _logger.LogError(ex, "Unhandled exception for {Path}", context.Request.Path);
-            await WriteProblemAsync(context, StatusCodes.Status500InternalServerError, "An unexpected error occurred", "Please contact support if the problem persists.");
+            var detail = _environment.IsDevelopment()
+                ? ex.ToString()
+                : "Please contact support if the problem persists.";
+            await WriteProblemAsync(context, StatusCodes.Status500InternalServerError, "An unexpected error occurred", detail);
         }
     }
 
